@@ -1,0 +1,41 @@
+{
+  "timezone": "Asia/Riyadh",
+  "password_note": "Password hash remains in index.html. For private internet access use repository/private hosting authentication.",
+  "file_patterns": {
+    "dispensing_qch": [
+      "dispensing_qch",
+      "qch_dispensing"
+    ],
+    "dispensing_pmfh": [
+      "dispensing_pmfh",
+      "pmfh_dispensing"
+    ],
+    "stat_qch": [
+      "stat_qch",
+      "qch_stat"
+    ],
+    "stat_pmfh": [
+      "stat_pmfh",
+      "pmfh_stat"
+    ],
+    "hold": [
+      "hold"
+    ],
+    "wasfaty": [
+      "wasfaty"
+    ]
+  },
+  "qch_physicians": [
+    "NIDHAL ABDULLAH ALMUTALEEQ",
+    "JEHAD JALAL SALEH ALALWYAT",
+    "TARFA MOHAMMED S AL DOSSARY"
+  ],
+  "mazen_physician": "MAZEN ABDULJALIL A ALZAYER",
+  "mazen_qch_rule": "chronic_only",
+  "inventory": {
+    "enabled": true,
+    "local_file": "data/inventory-latest.csv",
+    "medication_map": "data/medication-map.csv",
+    "remote_url_env": "INVENTORY_EXPORT_URL"
+  }
+}
