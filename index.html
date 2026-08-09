@@ -60,43 +60,59 @@ function pickQty(o,names){
   for(const k of names)if(o&&Object.prototype.hasOwnProperty.call(o,k))return toNum(o[k]);
   return null
 }
-function findInventoryRecordByCode(root,code){
-  code=nupcoKey(code);let found=null,seen=new Set();
-  function walk(x){
-    if(found||x==null||typeof x!=='object'||seen.has(x))return;
+function buildInventoryCodeIndex(root){
+  const idx=new Map(),seen=new Set(),stack=[root];
+  while(stack.length){
+    const x=stack.pop();
+    if(x==null||typeof x!=='object'||seen.has(x))continue;
     seen.add(x);
-    if(!Array.isArray(x)){
-      let candidates=[x.generic,x.nupco,x.nupco_code,x.code,x.item_code,x.Generic,x.NUPCO,x['NUPCO Code'],x['Generic Code']];
-      if(candidates.some(v=>nupcoKey(v)===code)){found=x;return}
+    if(Array.isArray(x)){for(let i=x.length-1;i>=0;i--)stack.push(x[i]);continue}
+    const candidates=[x.generic,x.nupco,x.nupco_code,x.code,x.item_code,x.Generic,x.NUPCO,x['NUPCO Code'],x['Generic Code']];
+    for(const v of candidates){
+      const k=nupcoKey(v);
+      if(k){idx.set(k,x);break}
     }
-    if(Array.isArray(x)){for(const y of x){walk(y);if(found)return}}
-    else for(const y of Object.values(x)){walk(y);if(found)return}
+    for(const v of Object.values(x))if(v&&typeof v==='object')stack.push(v);
   }
-  walk(root);return found
+  return idx
 }
 function refreshWasfatyInventoryFromLive(){
-  let root=window.DASHBOARD_DB;
+  const root=window.DASHBOARD_DB;
   if(!root)return false;
+
+  // Build the NUPCO lookup ONCE, then do O(1) lookups for every Wasfaty drug.
+  const idx=buildInventoryCodeIndex(root);
   let updated=0;
-  for(const [drug,z] of Object.entries(WASFATY_INV_CURRENT)){
-    let rec=findInventoryRecordByCode(root,z.nupco);
+
+  for(const z of Object.values(WASFATY_INV_CURRENT)){
+    const rec=idx.get(nupcoKey(z.nupco));
     if(!rec)continue;
+
     let lc=pickQty(rec,['lc_qty','LC','lc','LC Qty','lcQty']);
     let mo=pickQty(rec,['mosool_qty','Mosool','mosool','موصول','Mosool Qty','mosoolQty']);
     let total=pickQty(rec,['total_qty','Total','total','Total Qty','totalQty']);
-    if(lc==null)lc=0;if(mo==null)mo=0;
+
+    if(lc==null)lc=0;
+    if(mo==null)mo=0;
     if(total==null)total=lc+mo;
-    z.lc_qty=lc;z.mosool_qty=mo;z.total_qty=total;
+
+    z.lc_qty=lc;
+    z.mosool_qty=mo;
+    z.total_qty=total;
     z.inventory_status=total>0?'Available':'Unavailable';
     updated++;
   }
-  // Confirmed fallback from the current Inventory screenshot supplied by the user.
+
+  // Confirmed current value from user's Inventory screenshot.
   for(const z of Object.values(WASFATY_INV_CURRENT)){
     if(nupcoKey(z.nupco)==='5124120200000' && z.inventory_status==='Code not in snapshot'){
       z.lc_qty=646;z.mosool_qty=185;z.total_qty=831;z.inventory_status='Available';
     }
   }
-  for(const [k,v] of Object.entries(WASFATY_INV_CURRENT))WASFATY_INV_NORMALIZED[normDrugKey(k)]=v;
+
+  for(const [k,v] of Object.entries(WASFATY_INV_CURRENT)){
+    WASFATY_INV_NORMALIZED[normDrugKey(k)]=v;
+  }
   return updated>0
 }
 refreshWasfatyInventoryFromLive();
@@ -295,7 +311,7 @@ ${k('Written Items',nf(it))}${k('Prescriptions',nf(rx))}${k('Patients',nf(p))}${
 <thead><tr>
 <th>Hospital</th><th>Medication</th><th class="num">Items</th><th class="num">Patients</th><th class="num">Prescriptions</th>
 <th>NUPCO Code</th><th class="num">Required Qty</th><th class="num">LC</th><th class="num">Mosool</th><th class="num">Total Stock</th><th>Inventory Status</th>
-</tr></thead><tbody>${dr.map(x=>`<tr>
+</tr></thead><tbody>${dr.slice(0,window.__showAllWasfaty?dr.length:100).map(x=>`<tr>
 <td>${x.hospital}</td><td class="name">${x.drug}</td><td class="num">${nf(x.items)}</td><td class="num">${nf(x.patients)}</td>
 <td class="num">${nf(x.prescriptions)}</td><td>${x.nupco||'—'}</td>
 <td class="num">${nf(x.quantity||0)}</td>
@@ -303,6 +319,10 @@ ${k('Written Items',nf(it))}${k('Prescriptions',nf(rx))}${k('Patients',nf(p))}${
 <td class="num ${qtyClass(x.total_qty,x.inventory_status)}">${x.total_qty==null?'—':nf(x.total_qty)}</td>
 <td>${invStatusHtml(x.inventory_status)}</td>
 </tr>`).join('')}</tbody></table></div>
+${dr.length>100?`<div style="display:flex;justify-content:center;margin-top:12px">
+<button class="storetag" style="cursor:pointer;padding:8px 14px" onclick="window.__showAllWasfaty=!window.__showAllWasfaty;render()">
+${window.__showAllWasfaty?'Show Less':'Load All '+dr.length+' Medications'}
+</button></div>`:''}
 </div></div>`}
 
 function monthlySeries(){let months=month==='ALL'?M:[month],rows=[];for(const m of months){let H=hs(),do_=0,dd=0,so=0,sw=0,holds=0,witems=0,patients=0;for(const h of H){let d=DATA.dispensing[h][m].summary,s=DATA.stat[h][m].summary;do_+=d.orders||0;dd+=d.dispensed||0;patients+=d.patients||0;so+=s.orders||0;sw+=s.within||0;holds+=DATA.hold[h][m].holds||0;witems+=DATA.wasfaty[h][m].items||0}let disp=do_?100*dd/do_:0,stat=so?100*sw/so:0,index=(disp+stat)/2;rows.push({month:m,orders:do_,patients,disp,stat,index,holds,wasfaty:witems})}return rows}
