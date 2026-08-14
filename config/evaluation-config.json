@@ -1,0 +1,67 @@
+{
+  "role_weights": {
+    "Staff": {
+      "operational": 100,
+      "administrative": 0
+    },
+    "Supervisor": {
+      "operational": 50,
+      "administrative": 50
+    },
+    "Manager": {
+      "operational": 60,
+      "administrative": 40
+    }
+  },
+  "track_model": {
+    "Regular Staff": {
+      "automatic_components": {
+        "Dispensing": 70,
+        "STAT": 30
+      },
+      "manual_operational_default_weight": 0,
+      "hold_usage": "Quality indicator only; not an automatic penalty until Hold reasons are validated."
+    },
+    "Inventory": {
+      "automatic_components": {
+        "Inventory Requests": 100
+      },
+      "manual_operational_default_weight": 0,
+      "note": "1 transaction movement = 1 request. Volume is shown as a workload index; Admin can add quality criteria."
+    },
+    "Clinical": {
+      "automatic_components": {
+        "Clinical Interventions": 40,
+        "Acceptance": 35,
+        "Clinical Reviews": 25
+      },
+      "manual_operational_default_weight": 0,
+      "note": "Clinical employees are compared only with Clinical employees."
+    },
+    "Management": {
+      "automatic_components": {
+        "Applicable Operational Activity": 100
+      },
+      "manual_operational_default_weight": 0,
+      "note": "Role split is applied after the Operational score: Supervisor 50/50, Manager 60/40."
+    }
+  },
+  "stat_min_orders": 10,
+  "manual_evaluation_schema": {
+    "fields": [
+      "employee_id",
+      "month",
+      "category",
+      "criterion",
+      "weight",
+      "score_1_to_5",
+      "evaluator",
+      "notes"
+    ],
+    "categories": [
+      "Operational",
+      "Administrative"
+    ],
+    "storage": "localStorage prototype; Supabase-ready schema"
+  }
+}
