@@ -1,10 +1,17 @@
-# Pharmacy Performance Intelligence V20
+# Pharmacy Performance Intelligence V22 - Inventory Integrated
 
-Sep-Nov 2026 dispensing rebuilt from the two latest Pharmacy Monitor exports.
+Built from V21 Executive Reports with Sep-Nov 2026 inventory transaction reports integrated.
 
-- Dispensed rows only.
-- Actual Pharmacy Dispensing stores only. Nurse stations, OMNICELL and non-pharmacy locations excluded.
-- Only approved Employee Master staff/aliases included.
-- Added/recovered: AHMED JASSIM ALSHURAFA -> Ahmed AlAswad; MOHAMMED MOHSEN ALNASSER -> Maryam Al Muzayen; EMAN HABIB M ALNASSER -> Maryam Al Muzayen.
-- User-excluded names are not added and are excluded from performance calculations.
-- Jan-Aug dispensing and all STAT/Hold/Clinical/Inventory data preserved from V19.
+Inventory rules:
+- Every dated transaction line = one inventory request.
+- Addition/Receiving and Transfer Out are both counted as movements.
+- Activity is attached to any matched pharmacy employee, even when the employee is not Inventory-track.
+- Inventory KPI contributes to the Operational Score only for Inventory-track employees; for other tracks it appears as documented work activity only.
+- One duplicated Inpatient Addition/Receiving PDF was removed before counting.
+
+Matched inventory rows: 11454
+Unmatched ambiguous rows: 193
+Excluded rows: 8
+
+Unmatched ambiguous: {'FATIMAH ABDULLAH': 193}
+Excluded: {'HAMDY MAHMOUD': 3, 'MANAR HUSSAIN ALI ALONAYZAN': 4, 'NORAH ABDULLAH': 1}
