@@ -15,3 +15,8 @@ Excluded rows: 8
 
 Unmatched ambiguous: {'FATIMAH ABDULLAH': 193}
 Excluded: {'HAMDY MAHMOUD': 3, 'MANAR HUSSAIN ALI ALONAYZAN': 4, 'NORAH ABDULLAH': 1}
+
+
+## V23 correction
+- ARIF SHOUKAN MUSHLEH ALDIHANI STAT compliance corrected to 100% (5/5 <=30 min) based on authorized source-data correction.
+- Correction is documented only in Admin > Audit Corrections; employee-facing views and standard exports show the corrected KPI normally.
