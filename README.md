@@ -1,13 +1,12 @@
-Pharmacy Performance Intelligence V27
+# Pharmacy Performance Intelligence V30 — Role-Based Final Model
 
-Fix: Benchmark peer pools no longer change with UI filters.
-Hospital / Pharmacy / Track / Search filters now affect display only.
-Dispensing benchmark remains pharmacy-specific and uses the Top 3 average of all employees who worked in that pharmacy during the selected period.
+Clean role-first rebuild.
 
-Example validation (Jan-Nov 2026):
-NARJIS IBRAHIM M AL SHURAFA — PMFH Inpatient Pharmacy Dispensing
-Employee orders: 4
-Top 3: 2691, 2368, 1909
-Top 3 average: 2322.7
-Dispensing score: 0.17%
-Operational score (activity-based): approximately 53.4%
+- Staff are evaluated by professional track: Regular, Clinical, Inventory.
+- Out-of-role activity is additional credit only and capped at 10 points.
+- Supervisors: 50% MCC/Operational + 50% Administrative.
+- Managers: 60% MCC/Operational + 40% Administrative.
+- Manager MCC is based on managed service/team performance, not personal dispensing.
+- Maryam Al Muzayen is treated as Manager + Clinical: 70% Acute Care scope + 30% personal Clinical core.
+- Administrative scores are stored locally in the browser and remain separate from operational data.
+- V29 source data and documented audit corrections are retained; V26–V29 scoring logic is not reused.
