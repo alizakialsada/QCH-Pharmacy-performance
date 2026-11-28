@@ -88,12 +88,13 @@ function allOperationalPeers(monthsOverride=null){
  const saveT=S.track,saveQ=S.search;S.track='ALL';S.search='';const A=agg(null,monthsOverride);S.track=saveT;S.search=saveQ;return A;
 }
 
+function defaultBenchmarks(){return{dispensing:{method:'top',target:0,manual:0},hold:{method:'top',target:0,manual:0},stat:{method:'target',target:100,manual:0},clinical:{method:'top',target:0,manual:0},inventory:{method:'top',target:0,manual:0}}}
 function defaultEmployeeProfile(e){
  const roleSplit=S.d.config.role_weights[e?.role]||{operational:100,administrative:0};
  let k={dispensing:40,hold:30,stat:30,clinical:0,inventory:0};
  if(e?.track==='Clinical')k={dispensing:0,hold:30,stat:0,clinical:70,inventory:0};
  if(e?.track==='Inventory')k={dispensing:0,hold:0,stat:0,clinical:0,inventory:100};
- return {kpis:k,operational:Number(roleSplit.operational??100),administrative:Number(roleSplit.administrative??0)}
+ return {kpis:k,benchmarks:defaultBenchmarks(),operational:Number(roleSplit.operational??100),administrative:Number(roleSplit.administrative??0)}
 }
 function scoringProfiles(){
  try{return JSON.parse(localStorage.getItem('ppi_employee_scoring_profiles_v33')||'{}')||{}}catch(e){return {}}
@@ -101,55 +102,55 @@ function scoringProfiles(){
 function employeeProfile(eid){
  const e=EMap().get(eid),d=defaultEmployeeProfile(e),p=scoringProfiles()[eid];
  if(!p)return d;
+ const db=defaultBenchmarks(),pb=p.benchmarks||{};
  return {
-  kpis:{
-   dispensing:Number(p.kpis?.dispensing??d.kpis.dispensing),
-   hold:Number(p.kpis?.hold??d.kpis.hold),
-   stat:Number(p.kpis?.stat??d.kpis.stat),
-   clinical:Number(p.kpis?.clinical??d.kpis.clinical),
-   inventory:Number(p.kpis?.inventory??d.kpis.inventory)
-  },
+  kpis:{dispensing:Number(p.kpis?.dispensing??d.kpis.dispensing),hold:Number(p.kpis?.hold??d.kpis.hold),stat:Number(p.kpis?.stat??d.kpis.stat),clinical:Number(p.kpis?.clinical??d.kpis.clinical),inventory:Number(p.kpis?.inventory??d.kpis.inventory)},
+  benchmarks:Object.fromEntries(Object.keys(db).map(k=>[k,{method:String(pb[k]?.method??db[k].method),target:Number(pb[k]?.target??db[k].target),manual:Number(pb[k]?.manual??db[k].manual)}])),
   operational:Number(p.operational??d.operational),administrative:Number(p.administrative??d.administrative)
  }
 }
-function saveEmployeeProfile(eid,p){const all=scoringProfiles();all[eid]=p;localStorage.setItem('ppi_employee_scoring_profiles_v33',JSON.stringify(all));localStorage.setItem('ppi_profile_selected_v34',eid)}
+function saveEmployeeProfile(eid,p){const all=scoringProfiles();all[eid]=p;localStorage.setItem('ppi_employee_scoring_profiles_v33',JSON.stringify(all));localStorage.setItem('ppi_profile_selected_v35',eid)}
 function resetEmployeeProfile(eid){const all=scoringProfiles();delete all[eid];localStorage.setItem('ppi_employee_scoring_profiles_v33',JSON.stringify(all))}
-function profileSummary(eid){const p=employeeProfile(eid);return `Disp ${p.kpis.dispensing}% · Hold ${p.kpis.hold}% · STAT ${p.kpis.stat}% · Clinical ${p.kpis.clinical}% · Inventory ${p.kpis.inventory}%`}
+function benchmarkLabel(b){if(!b)return 'Top employee';if(b.method==='top3')return 'Top 3 avg';if(b.method==='target')return 'Target '+b.target;if(b.method==='manual')return 'Manual '+b.manual+'%';return 'Top employee'}
+function profileSummary(eid){const p=employeeProfile(eid);return `Disp ${p.kpis.dispensing}% (${benchmarkLabel(p.benchmarks.dispensing)}) · Hold ${p.kpis.hold}% (${benchmarkLabel(p.benchmarks.hold)}) · STAT ${p.kpis.stat}% (${benchmarkLabel(p.benchmarks.stat)}) · Clinical ${p.kpis.clinical}% (${benchmarkLabel(p.benchmarks.clinical)}) · Inventory ${p.kpis.inventory}% (${benchmarkLabel(p.benchmarks.inventory)})`}
+
 
 function manuals(){return JSON.parse(localStorage.getItem('ppi_v5_manual')||'[]')}
 function manualPack(eid,cat,monthsOverride=null){const ms=monthsOverride||selectedMonths(),x=manuals().filter(a=>a.employee_id===eid&&ms.has(a.month)&&a.category===cat),w=x.reduce((s,a)=>s+Number(a.weight||0),0),score=w?x.reduce((s,a)=>s+(Number(a.score||0)/5)*100*Number(a.weight||0),0)/w:null;return{weight:Math.min(w,100),score,items:x}}
 
-function pharmacyWorkload(a,peers){
+function avgTop3(vals){const a=vals.map(Number).filter(v=>v>0).sort((x,y)=>y-x).slice(0,3);return a.length?a.reduce((s,v)=>s+v,0)/a.length:0}
+function metricBenchmark(vals,b){
+ const a=vals.map(Number).filter(v=>Number.isFinite(v)&&v>=0),method=b?.method||'top';
+ if(method==='manual')return {den:null,label:`Manual score ${Number(b?.manual||0).toFixed(1)}%`};
+ if(method==='target')return {den:Number(b?.target||0),label:`Fixed target ${Number(b?.target||0)}`};
+ if(method==='top3'){const den=avgTop3(a);return {den,label:`Top 3 average ${den.toFixed(1)}`}}
+ const den=a.length?Math.max(0,...a):0;return {den,label:`Top employee ${den.toFixed(1)}`}
+}
+function scoreAgainst(actual,vals,b){
+ if((b?.method||'top')==='manual')return Math.max(0,Math.min(100,Number(b?.manual||0)));
+ const bm=metricBenchmark(vals,b),den=Number(bm.den||0);return den>0?Math.max(0,Math.min(100,100*Number(actual||0)/den)):0
+}
+function pharmacyWorkload(a,peers,b){
  if(!a.orders)return {score:0,details:[]};
- const total=[...a.stores.values()].reduce((s,v)=>s+v,0); if(!total)return {score:0,details:[]};
+ const total=[...a.stores.values()].reduce((s,v)=>s+v,0);if(!total)return {score:0,details:[]};
  let details=[];
  for(const [store,orders] of a.stores){
-   let top=0,topName='';
-   for(const p of peers.filter(x=>x.home===a.home)){
-     const v=p.stores.get(store)||0;if(v>top){top=v;topName=p.name}
-   }
-   const score=top?Math.min(100,100*orders/top):0, share=100*orders/total;
-   details.push({store,orders,top,topName,score,share,weighted:score*share/100});
+  const eligible=peers.filter(x=>x.home===a.home),vals=eligible.map(x=>x.stores.get(store)||0),bm=metricBenchmark(vals,b),score=scoreAgainst(orders,vals,b),share=100*orders/total;
+  let top=vals.length?Math.max(0,...vals):0,topName='';for(const p of eligible){const v=p.stores.get(store)||0;if(v===top&&v>0){topName=p.name;break}}
+  details.push({store,orders,top,topName,benchmark:bm.den,benchmarkLabel:bm.label,score,share,weighted:score*share/100});
  }
- const score=details.reduce((s,x)=>s+x.weighted,0);
- return {score,details:details.sort((x,y)=>y.orders-x.orders)};
+ return {score:details.reduce((s,x)=>s+x.weighted,0),details:details.sort((x,y)=>y.orders-x.orders)};
 }
-function maxMetric(peers,field,home=null){const vals=peers.filter(x=>(!home||x.home===home)).map(x=>Number(x[field]||0));return vals.length?Math.max(0,...vals):0}
 function metricComponents(a,peers){
- const p=employeeProfile(a.id),w=pharmacyWorkload(a,peers),maxHold=maxMetric(peers,'holds',a.home),maxClinical=maxMetric(peers,'clin'),maxInventory=maxMetric(peers,'inv',a.home);
- const scores={
-  dispensing:w.score||0,
-  hold:maxHold?Math.min(100,100*(a.holds||0)/maxHold):0,
-  stat:a.stat>0?Math.min(100,Number(a.statc||0)):0,
-  clinical:maxClinical?Math.min(100,100*(a.clin||0)/maxClinical):0,
-  inventory:maxInventory?Math.min(100,100*(a.inv||0)/maxInventory):0
- };
+ const p=employeeProfile(a.id),b=p.benchmarks,w=pharmacyWorkload(a,peers,b.dispensing),holdVals=peers.filter(x=>x.home===a.home).map(x=>x.holds||0),clinicalVals=peers.map(x=>x.clin||0),inventoryVals=peers.filter(x=>x.home===a.home).map(x=>x.inv||0),statVals=peers.filter(x=>x.home===a.home&&x.stat>0).map(x=>x.statc||0);
+ const scores={dispensing:w.score||0,hold:scoreAgainst(a.holds||0,holdVals,b.hold),stat:scoreAgainst(a.stat>0?Number(a.statc||0):0,statVals,b.stat),clinical:scoreAgainst(a.clin||0,clinicalVals,b.clinical),inventory:scoreAgainst(a.inv||0,inventoryVals,b.inventory)};
+ const hb=metricBenchmark(holdVals,b.hold),cb=metricBenchmark(clinicalVals,b.clinical),ib=metricBenchmark(inventoryVals,b.inventory),sb=metricBenchmark(statVals,b.stat);
  return [
-  {key:'dispensing',n:'Dispensing Workload',w:p.kpis.dispensing,s:scores.dispensing,raw:`${nf(a.orders)} orders`,workload:w},
-  {key:'hold',n:'Patient Safety Hold',w:p.kpis.hold,s:scores.hold,raw:maxHold?`${nf(a.holds)} / ${nf(maxHold)}`:`${nf(a.holds)} / 0`},
-  {key:'stat',n:'STAT ≤30 min',w:p.kpis.stat,s:scores.stat,raw:a.stat>0?`${nf(a.s30)} / ${nf(a.stat)}`:'0 orders'},
-  {key:'clinical',n:'Clinical Interventions',w:p.kpis.clinical,s:scores.clinical,raw:maxClinical?`${nf(a.clin)} / ${nf(maxClinical)}`:`${nf(a.clin)} / 0`},
-  {key:'inventory',n:'Inventory Requests',w:p.kpis.inventory,s:scores.inventory,raw:maxInventory?`${nf(a.inv)} / ${nf(maxInventory)}`:`${nf(a.inv)} / 0`}
+  {key:'dispensing',n:'Dispensing Workload',w:p.kpis.dispensing,s:scores.dispensing,raw:`${nf(a.orders)} orders · ${benchmarkLabel(b.dispensing)}`,benchmark:b.dispensing,workload:w},
+  {key:'hold',n:'Patient Safety Hold',w:p.kpis.hold,s:scores.hold,raw:`${nf(a.holds)} · ${hb.label}`,benchmark:b.hold},
+  {key:'stat',n:'STAT ≤30 min',w:p.kpis.stat,s:scores.stat,raw:a.stat>0?`${nf(a.s30)} / ${nf(a.stat)} · ${sb.label}`:`0 orders · ${sb.label}`,benchmark:b.stat},
+  {key:'clinical',n:'Clinical Interventions',w:p.kpis.clinical,s:scores.clinical,raw:`${nf(a.clin)} · ${cb.label}`,benchmark:b.clinical},
+  {key:'inventory',n:'Inventory Requests',w:p.kpis.inventory,s:scores.inventory,raw:`${nf(a.inv)} · ${ib.label}`,benchmark:b.inventory}
  ];
 }
 function opScore(a,peers,monthsOverride=null){
@@ -250,8 +251,8 @@ function renderWasfaty(){const R=filteredWasfaty();$('#wbody').innerHTML=`<div c
 function Admin(){
  const E=S.d.employees.filter(e=>visibleEmployee(e)&&e.role!=='Director').sort((a,b)=>a.name.localeCompare(b.name)),M=manuals();
  const evaluators=S.d.employees.filter(e=>e.role==='Manager'||e.role==='Director').sort((a,b)=>a.name.localeCompare(b.name));
- const selectedProfileEmp=(localStorage.getItem('ppi_profile_selected_v34')&&E.some(e=>e.id===localStorage.getItem('ppi_profile_selected_v34')))?localStorage.getItem('ppi_profile_selected_v34'):(E[0]?.id||'');
- return`<div class="card"><div class="hero"><div><h3 style="margin:0">Employee Scoring Profiles</h3><div class="muted">Choose any employee and set exactly how their performance is weighted. Raw workload numbers never change. No hidden redistribution is used.</div></div></div>
+ const selectedProfileEmp=(localStorage.getItem('ppi_profile_selected_v35')&&E.some(e=>e.id===localStorage.getItem('ppi_profile_selected_v35')))?localStorage.getItem('ppi_profile_selected_v35'):(E[0]?.id||'');
+ return`<div class="card"><div class="hero"><div><h3 style="margin:0">Employee Scoring Profiles</h3><div class="muted">Choose any employee, set KPI weights, and choose how each KPI is benchmarked. Raw workload numbers never change. No hidden redistribution is used.</div></div></div>
  <div class="form section"><label>Employee<select id="profileEmp">${E.map((e,i)=>`<option value="${e.id}" ${e.id===selectedProfileEmp?'selected':''}>${e.name} — ${e.home_hospital} — ${e.role}/${e.track}</option>`).join('')}</select></label></div>
  <div id="profileEditor"></div></div>
  <div class="card section"><h3>Saved Employee Profiles</h3><div class="muted small">Only employees with a custom override are listed here. Everyone else uses their role/track default.</div>${tbl(['Employee','Role / Track','Operational KPI Weights','Final Split'],Object.keys(scoringProfiles()).map(id=>{const e=EMap().get(id),p=e?employeeProfile(id):null;return e&&p?`<tr><td>${e.name}</td><td>${e.role} / ${e.track}</td><td>${profileSummary(id)}</td><td>${p.operational}% Operational / ${p.administrative}% Administrative</td></tr>`:''}).filter(Boolean))}</div>
@@ -260,15 +261,19 @@ function Admin(){
  <div class="card section">${tbl(['Employee','Month','Criterion','Weight','Score','Evaluator',''],M.filter(x=>x.category==='Administrative').map((x,i)=>{const e=EMap().get(x.employee_id);return`<tr><td>${e?.name||x.employee_id}</td><td>${x.month}</td><td>${x.criterion}</td><td>${x.weight}%</td><td>${x.score}/5</td><td>${x.evaluator||'—'}</td><td><button data-del="${manuals().indexOf(x)}">Delete</button></td></tr>`}))}</div>`
 }
 function renderProfileEditor(eid){
- const e=EMap().get(eid);if(!e)return;localStorage.setItem('ppi_profile_selected_v34',eid);const p=employeeProfile(eid),A=allOperationalPeers(),a=A.find(x=>x.id===eid),c=a?metricComponents(a,A):[],currentOp=a?opScore(a,A).score:null;
- const rows=c.map(x=>`<tr><td>${x.n}</td><td>${x.raw}</td><td>${pc(x.s)}</td><td><input class="profWeight" data-k="${x.key}" type="number" min="0" max="100" step="1" value="${x.w}" style="width:90px"></td><td>${(x.s*x.w/100).toFixed(1)}</td></tr>`).join('');
- $('#profileEditor').innerHTML=`<div class="notice"><b>${e.name}</b> · ${e.home_hospital} · ${e.role} / ${e.track}<br><span class="small">Raw activity stays unchanged. Your weights below determine the Operational Score.</span></div>
+ const e=EMap().get(eid);if(!e)return;localStorage.setItem('ppi_profile_selected_v35',eid);const p=employeeProfile(eid),A=allOperationalPeers(),a=A.find(x=>x.id===eid),c=a?metricComponents(a,A):[],currentOp=a?opScore(a,A).score:null;
+ const methodOptions=(sel)=>[['top','Top employee'],['top3','Top 3 average'],['target','Fixed target'],['manual','Manual score']].map(([v,l])=>`<option value="${v}" ${sel===v?'selected':''}>${l}</option>`).join('');
+ const rows=c.map(x=>{const b=p.benchmarks[x.key]||defaultBenchmarks()[x.key],val=b.method==='manual'?b.manual:b.target;return`<tr><td>${x.n}</td><td>${x.raw}</td><td class="liveScore" data-k="${x.key}">${pc(x.s)}</td><td><input class="profWeight" data-k="${x.key}" type="number" min="0" max="100" step="1" value="${x.w}" style="width:82px"></td><td><select class="profMethod" data-k="${x.key}" style="min-width:145px">${methodOptions(b.method)}</select></td><td><input class="profBenchValue" data-k="${x.key}" type="number" min="0" step="0.1" value="${val||0}" style="width:105px"></td><td class="liveContribution" data-k="${x.key}">${(x.s*x.w/100).toFixed(1)}</td></tr>`}).join('');
+ $('#profileEditor').innerHTML=`<div class="notice"><b>${e.name}</b> · ${e.home_hospital} · ${e.role} / ${e.track}<br><span class="small">You control both KPI weight and benchmark method. Fixed target uses Actual ÷ Target. Manual score uses the percentage you enter directly.</span></div>
  <div class="grid section">${card('Dispensing Orders',nf(a?.orders||0))}${card('Patient Safety Hold',nf(a?.holds||0))}${card('STAT',a?.stat?pc(a.statc):'0 orders')}${card('Clinical Interventions',nf(a?.clin||0))}${card('Inventory Requests',nf(a?.inv||0))}</div>
- <div class="grid section">${card('Current Operational Score',pc(currentOp),scoringProfiles()[eid]?'Custom profile applied':'Role/track default')}</div><div class="card section"><h3>Operational KPI Distribution</h3>${tbl(['KPI','Raw Activity / Benchmark','KPI Score','Weight %','Contribution'],rows?rows.split('</tr>').filter(Boolean).map(x=>x+'</tr>'):[])}<div class="section"><b>Total KPI Weight: <span id="profileTotal">${Object.values(p.kpis).reduce((s,v)=>s+v,0)}</span>%</b> <span class="muted">(must equal 100%)</span></div></div>
- <div class="card section"><h3>Final Performance Split</h3><div class="form"><label>Operational %<input id="profOperational" type="number" min="0" max="100" value="${p.operational}"></label><label>Administrative %<input id="profAdministrative" type="number" min="0" max="100" value="${p.administrative}"></label></div><div class="small muted">Operational + Administrative must equal 100%. Staff can remain 100/0; Supervisor/Manager can be customized.</div></div>
+ <div class="grid section">${card('Current Operational Score',pc(currentOp),scoringProfiles()[eid]?'Custom profile applied':'Role/track default')}<div class="card kpi"><span class="muted">Preview Operational Score</span><b id="profilePreview">${pc(currentOp)}</b><small class="muted">Updates before saving</small></div></div>
+ <div class="card section"><h3>Operational KPI Distribution & Benchmark Control</h3>${tbl(['KPI','Raw / Current Benchmark','KPI Score','Weight %','Benchmark Method','Target / Manual %','Contribution'],rows?rows.split('</tr>').filter(Boolean).map(x=>x+'</tr>'):[])}<div class="section"><b>Total KPI Weight: <span id="profileTotal">${Object.values(p.kpis).reduce((s,v)=>s+v,0)}</span>%</b> <span class="muted">(must equal 100%)</span></div><div class="small muted">Top employee = highest eligible peer. Top 3 average = average of the 3 highest positive peer values. Fixed target = your numeric target. Manual score = direct 0–100 KPI score.</div></div>
+ <div class="card section"><h3>Final Performance Split</h3><div class="form"><label>Operational %<input id="profOperational" type="number" min="0" max="100" value="${p.operational}"></label><label>Administrative %<input id="profAdministrative" type="number" min="0" max="100" value="${p.administrative}"></label></div><div class="small muted">Operational + Administrative must equal 100%.</div></div>
  <div class="actions section"><button class="primary" id="saveProfile">Save Employee Profile</button><button id="resetProfile">Reset This Employee to Default</button><button class="green" onclick="exportEmployeeExcel('${eid}')">Export Employee Excel</button><button class="green" onclick="downloadEmployeePdf('${eid}')">Download Employee PDF</button></div>`;
- const recalc=()=>{let t=0;document.querySelectorAll('.profWeight').forEach(i=>t+=Number(i.value)||0);$('#profileTotal').textContent=t};document.querySelectorAll('.profWeight').forEach(i=>i.oninput=recalc);
- $('#saveProfile').onclick=()=>{const before=currentOp,k={};document.querySelectorAll('.profWeight').forEach(i=>k[i.dataset.k]=Number(i.value)||0);const total=Object.values(k).reduce((s,v)=>s+v,0),op=Number($('#profOperational').value)||0,ad=Number($('#profAdministrative').value)||0;if(Math.abs(total-100)>.001){alert('Operational KPI weights must equal exactly 100%. Current total: '+total+'%');return}if(Math.abs(op+ad-100)>.001){alert('Operational + Administrative must equal exactly 100%. Current total: '+(op+ad)+'%');return}saveEmployeeProfile(eid,{kpis:k,operational:op,administrative:ad});const AA=allOperationalPeers(),aa=AA.find(x=>x.id===eid),after=aa?opScore(aa,AA).score:null;alert('Profile applied to '+e.name+'\nBefore: '+(before==null?'—':before.toFixed(1)+'%')+'\nAfter: '+(after==null?'—':after.toFixed(1)+'%'));renderProfileEditor(eid)};
+ const buildDraft=()=>{const k={},bench={};document.querySelectorAll('.profWeight').forEach(i=>k[i.dataset.k]=Number(i.value)||0);document.querySelectorAll('.profMethod').forEach(i=>{const key=i.dataset.k,method=i.value,v=Number(document.querySelector(`.profBenchValue[data-k="${key}"]`)?.value)||0;bench[key]={method,target:method==='target'?v:0,manual:method==='manual'?Math.max(0,Math.min(100,v)):0}});return{kpis:k,benchmarks:bench,operational:Number($('#profOperational').value)||0,administrative:Number($('#profAdministrative').value)||0}};
+ const preview=()=>{const d=buildDraft(),t=Object.values(d.kpis).reduce((s,v)=>s+v,0);$('#profileTotal').textContent=t;const all=scoringProfiles(),old=all[eid];all[eid]=d;localStorage.setItem('ppi_employee_scoring_profiles_v33',JSON.stringify(all));const AA=allOperationalPeers(),aa=AA.find(x=>x.id===eid),ff=aa?opScore(aa,AA):null;document.querySelectorAll('.liveScore').forEach(el=>{const comp=ff?.components?.find(x=>x.key===el.dataset.k);el.textContent=pc(comp?.s)});document.querySelectorAll('.liveContribution').forEach(el=>{const comp=ff?.components?.find(x=>x.key===el.dataset.k);el.textContent=comp?(comp.s*comp.w/100).toFixed(1):'0.0'});$('#profilePreview').textContent=pc(ff?.score);if(old===undefined)delete all[eid];else all[eid]=old;localStorage.setItem('ppi_employee_scoring_profiles_v33',JSON.stringify(all))};
+ document.querySelectorAll('.profWeight,.profMethod,.profBenchValue').forEach(i=>i.oninput=preview);document.querySelectorAll('.profMethod').forEach(i=>i.onchange=preview);
+ $('#saveProfile').onclick=()=>{const before=currentOp,d=buildDraft(),total=Object.values(d.kpis).reduce((s,v)=>s+v,0);if(Math.abs(total-100)>.001){alert('Operational KPI weights must equal exactly 100%. Current total: '+total+'%');return}if(Math.abs(d.operational+d.administrative-100)>.001){alert('Operational + Administrative must equal exactly 100%. Current total: '+(d.operational+d.administrative)+'%');return}for(const [k,b] of Object.entries(d.benchmarks)){if(b.method==='target'&&b.target<=0){alert('Fixed target for '+k+' must be greater than 0.');return}}saveEmployeeProfile(eid,d);const AA=allOperationalPeers(),aa=AA.find(x=>x.id===eid),after=aa?opScore(aa,AA).score:null;alert('Profile applied to '+e.name+'\nBefore: '+(before==null?'—':before.toFixed(1)+'%')+'\nAfter: '+(after==null?'—':after.toFixed(1)+'%'));renderProfileEditor(eid)};
  $('#resetProfile').onclick=()=>{resetEmployeeProfile(eid);alert('Employee profile reset to role/track default.');renderProfileEditor(eid)}
 }
 
@@ -277,7 +282,7 @@ function showEmployee(id){
  $('#modalTitle').innerHTML=`<h2 style="margin:0">${a.name}</h2><div class="gold">${a.role} • ${a.track} • ${a.home}</div><div class="muted">${a.title||''}${a.reports?' • Reports to: '+a.reports:''}</div>`;
  $('#modalBody').innerHTML=`<div class="actions section"><button class="primary" onclick="exportEmployeeExcel('${id}')">Export Employee to Excel</button><button class="green" onclick="downloadEmployeePdf('${id}')">Download Employee PDF</button><button onclick="openEmployeeAnalytics('${id}')">Open Employee Analytics</button></div>
  <div class="grid section">${card('Final Performance',pc(f.final),f.status)}${card('Operational Score',pc(f.op.score),`Contribution ${roleTargetText(f)}`)}${card('Weighted Workload',pc(w.score),`${w.details.length} pharmacy location(s)`)}${card('Patient Safety Holds',nf(a.holds))}${card('STAT',pc(a.statc),nf(a.stat)+' orders')}${card('Clinical Interventions',nf(a.clin))}${card('Inventory Requests',nf(a.inv))}${card('Patients',nf(a.patients))}</div>
- <div class="card section"><h3>Pharmacy Workload Details</h3>${tbl(['Pharmacy','Orders','Top Employee','Top Orders','Score','Share','Weighted'],w.details.map(x=>`<tr><td>${x.store}</td><td>${nf(x.orders)}</td><td>${x.topName}</td><td>${nf(x.top)}</td><td>${pc(x.score)}</td><td>${pc(x.share)}</td><td>${pc(x.weighted)}</td></tr>`))}</div>
+ <div class="card section"><h3>Pharmacy Workload Details</h3>${tbl(['Pharmacy','Orders','Benchmark','Benchmark Value','Score','Share','Weighted'],w.details.map(x=>`<tr><td>${x.store}</td><td>${nf(x.orders)}</td><td>${x.benchmarkLabel||x.topName||'—'}</td><td>${x.benchmark==null?'Manual':nf(x.benchmark)}</td><td>${pc(x.score)}</td><td>${pc(x.share)}</td><td>${pc(x.weighted)}</td></tr>`))}</div>
  <div class="card section"><h3>Score Components</h3>${tbl(['Component','Raw Comparison','Score','Weight'],f.op.components.map(c=>`<tr><td>${c.n}</td><td>${c.raw}</td><td>${pc(c.s)}</td><td>${c.w}%</td></tr>`))}</div>
  <div class="card section"><h3>Monthly Activity</h3>${tbl(['Month','Dispensing Orders','Patients','Hold','STAT Orders','STAT ≤30','Clinical','Inventory'],monthly.map(r=>`<tr><td>${r.month}</td><td>${nf(r.dispensing?.orders)}</td><td>${nf(r.dispensing?.patients)}</td><td>${nf(r.hold?.holds)}</td><td>${nf(r.stat?.orders)}</td><td>${pc(r.stat?.compliance)}</td><td>${nf(r.clinical?.interventions)}</td><td>${nf(r.inventory?.requests)}</td></tr>`))}</div>`;
  $('#modal').classList.add('open')
@@ -499,7 +504,7 @@ function employeeExportSheets(id){
  const band=v=>v==null?'Pending':v>=90?'Outstanding':v>=80?'Excellent':v>=70?'Very Good':v>=60?'Good':'Needs Review';
  return [
  {name:'Executive Summary',widths:[190,170,300],rows:[['Metric','Value','Interpretation'],['Employee',a.name,'Employee master'],['Home Hospital',a.home,'Master assignment'],['Role / Track',`${a.role} / ${a.track}`,'Evaluation pathway'],['Applied KPI Profile',profileSummary(id),'Admin controlled'],['Final Split',`${employeeProfile(id).operational}% Operational / ${employeeProfile(id).administrative}% Administrative`,'Admin controlled'],['Title',a.title||'',''],['Reports To',a.reports||'',''],['Main Pharmacy',a.main||'',''],['Final Performance',f.final==null?'Pending':Number(f.final).toFixed(1)+'%',band(f.final)],['Operational Score',f.op.score==null?'Pending':Number(f.op.score).toFixed(1)+'%','Applicable KPI calculation'],['Administrative Score',f.ad.score==null?'Pending':Number(f.ad.score).toFixed(1)+'%','Manual evaluation if applicable'],['Dispensing Orders',a.orders,'Total workload'],['Unique Patients',a.patients,'Patients served'],['QCH Orders',q,'Activity at QCH'],['PMFH Orders',p,'Activity at PMFH'],['Patient Safety Holds',a.holds,'Positive safety activity'],['STAT Orders',a.stat,'STAT workload'],['STAT <=30 min',a.s30,'Compliant closures'],['STAT Compliance',a.statc==null?'N/A':Number(a.statc).toFixed(1)+'%','<=30 min / total STAT'],['Clinical Interventions',a.clin,'Clinical workload'],['Clinical Reviews',a.reviews,'Clinical reviews'],['Inventory Requests',a.inv,'Inventory workload']]},
- {name:'Scoring Profile',widths:[220,120,260],rows:[['KPI / Split','Weight %','Rule'],['Dispensing',employeeProfile(id).kpis.dispensing,'Employee-specific'],['Patient Safety Hold',employeeProfile(id).kpis.hold,'Employee-specific'],['STAT',employeeProfile(id).kpis.stat,'Employee-specific'],['Clinical',employeeProfile(id).kpis.clinical,'Employee-specific'],['Inventory',employeeProfile(id).kpis.inventory,'Employee-specific'],['Operational Split',employeeProfile(id).operational,'Final performance split'],['Administrative Split',employeeProfile(id).administrative,'Final performance split']]},
+ {name:'Scoring Profile',widths:[220,120,260],rows:[['KPI / Split','Weight %','Benchmark Rule'],['Dispensing',employeeProfile(id).kpis.dispensing,benchmarkLabel(employeeProfile(id).benchmarks.dispensing)],['Patient Safety Hold',employeeProfile(id).kpis.hold,benchmarkLabel(employeeProfile(id).benchmarks.hold)],['STAT',employeeProfile(id).kpis.stat,benchmarkLabel(employeeProfile(id).benchmarks.stat)],['Clinical',employeeProfile(id).kpis.clinical,benchmarkLabel(employeeProfile(id).benchmarks.clinical)],['Inventory',employeeProfile(id).kpis.inventory,benchmarkLabel(employeeProfile(id).benchmarks.inventory)],['Operational Split',employeeProfile(id).operational,'Final performance split'],['Administrative Split',employeeProfile(id).administrative,'Final performance split']]},
  {name:'KPI Calculation',widths:[200,160,100,90,130,120],rows:[['Component','Raw / Basis','Score %','Weight %','Weighted Contribution','Performance Band'],...f.op.components.map(c=>[c.n,c.raw,Number(c.s||0).toFixed(1),c.w,(Number(c.s||0)*Number(c.w||0)/100).toFixed(2),band(c.s)])]},
  {name:'Monthly Trend',widths:[85,110,90,90,90,80,85,85,110,120,105,105,110],rows:[['Month','Dispensing','Patients','QCH Orders','PMFH Orders','Hold','STAT','STAT <=30','STAT Compliance %','Clinical Interventions','Clinical Reviews','Inventory','Overall'],...audit.map(r=>[r.month,r.disp,r.patients,r.qch,r.pmfh,r.hold,r.stat,r.within30,r.statc==null?'N/A':Number(r.statc).toFixed(1),r.clin,r.reviews,r.inv,r.overall])]},
  {name:'Hospital Split',widths:[160,140,180],rows:[['Hospital','Dispensing Orders','Share of Employee Work %'],['QCH',q,total?Number((q/total*100).toFixed(1)):0],['PMFH',p,total?Number((p/total*100).toFixed(1)):0],['TOTAL',total,total?100:0]]},
